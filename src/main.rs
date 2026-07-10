@@ -1,16 +1,18 @@
 mod audio;
+mod game;
 mod pitch;
+mod song;
 mod tab;
 
 use audio::get_scarlet;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use game::{Game, StepResult};
 use pitch_detection::detector::yin::YINDetector;
 use pitch_detection::detector::PitchDetector;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
-use tab::Fretboard;
 
 const WINDOW_SIZE: usize = 4096;
 const PROCESS_INTERVAL_MS: u64 = 50;
@@ -51,10 +53,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let handle = thread::spawn(move || {
         let mut detector = YINDetector::new(WINDOW_SIZE, WINDOW_SIZE);
         let mut buffer = vec![0.0_f64; WINDOW_SIZE];
-        let mut fretboard = Fretboard::new();
-        fretboard.render_initial();
+        let mut game = Game::new(song::wonderful_tonight());
 
         loop {
+            if game.is_complete() {
+                break;
+            }
+
             thread::sleep(Duration::from_millis(PROCESS_INTERVAL_MS));
 
             let maybe_samples = {
@@ -77,12 +82,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     power_threshold,
                     clarity_threshold,
                 ) {
-                    if let Some((string, fret)) = pitch::freq_to_string_fret(pitch.frequency) {
-                        fretboard.mark(string, fret as usize);
+                    match game.on_pitch(pitch.frequency) {
+                        StepResult::SongComplete => break,
+                        StepResult::NoMatch
+                        | StepResult::Advanced
+                        | StepResult::WindowBumped => {}
                     }
-                    fretboard.to_note_line();
-                    let note = pitch::freq_to_note(pitch.frequency);
-                    println!("Frequency: {:.2} Hz ({})", pitch.frequency, note);
                 }
             }
         }
